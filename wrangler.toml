@@ -1,5 +1,13 @@
 name = "argus"
 compatibility_date = "2026-08-25"
+main = "worker/index.ts"
+
+[vars]
+SUPABASE_URL = "https://rwfkncopqlhfhcdzgtou.supabase.co"
+
+[triggers]
+crons = ["*/1 * * * *"]
 
 [assets]
 directory = "./dist"
+not_found_handling = "single-page-application"

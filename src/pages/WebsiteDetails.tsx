@@ -11,6 +11,8 @@ type Website = {
 	response_time: number | null;
 	last_checked_at: string | null;
 	created_at: string;
+	domain_expires_at: string | null;
+	domain_checked_at: string | null;
 };
 
 type WebsiteCheck = {
@@ -63,7 +65,6 @@ function ResponseTimeGraph({ checks }: { checks: WebsiteCheck[] }) {
 			<div className="mb-4 flex items-center justify-between">
 				<div>
 					<h3 className="font-medium text-white">Response time</h3>
-
 					<p className="mt-1 text-xs text-zinc-500">Last 24 hours</p>
 				</div>
 
@@ -120,13 +121,137 @@ function ResponseTimeGraph({ checks }: { checks: WebsiteCheck[] }) {
 	);
 }
 
+function DomainExpiration({
+	expiresAt,
+	checkedAt,
+}: {
+	expiresAt: string | null;
+	checkedAt: string | null;
+}) {
+	if (!expiresAt) {
+		return (
+			<div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+				<div className="flex items-start justify-between gap-4">
+					<div>
+						<h3 className="font-medium text-white">Domain expiration</h3>
+
+						<p className="mt-1 text-xs text-zinc-500">RDAP expiration check</p>
+					</div>
+
+					<span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs text-zinc-400">
+						Unavailable
+					</span>
+				</div>
+
+				<p className="mt-5 text-sm text-zinc-500">
+					No domain expiration date could be determined.
+				</p>
+
+				{checkedAt && (
+					<p className="mt-3 text-xs text-zinc-600">
+						Last checked {new Date(checkedAt).toLocaleString()}
+					</p>
+				)}
+			</div>
+		);
+	}
+
+	const expiration = new Date(expiresAt);
+	const now = new Date();
+
+	const millisecondsRemaining = expiration.getTime() - now.getTime();
+
+	const daysRemaining = Math.ceil(
+		millisecondsRemaining / (1000 * 60 * 60 * 24),
+	);
+
+	let status: 'healthy' | 'warning' | 'urgent' | 'critical';
+
+	if (daysRemaining >= 90) {
+		status = 'healthy';
+	} else if (daysRemaining >= 30) {
+		status = 'warning';
+	} else if (daysRemaining >= 7) {
+		status = 'urgent';
+	} else {
+		status = 'critical';
+	}
+
+	const styles = {
+		healthy: {
+			badge: 'bg-green-500/10 text-green-400',
+			dot: 'bg-green-500',
+			label: 'Healthy',
+		},
+		warning: {
+			badge: 'bg-yellow-500/10 text-yellow-400',
+			dot: 'bg-yellow-500',
+			label: 'Expiring soon',
+		},
+		urgent: {
+			badge: 'bg-orange-500/10 text-orange-400',
+			dot: 'bg-orange-500',
+			label: 'Renew soon',
+		},
+		critical: {
+			badge: 'bg-red-500/10 text-red-400',
+			dot: 'bg-red-500',
+			label: daysRemaining < 0 ? 'Expired' : 'Critical',
+		},
+	};
+
+	const currentStyle = styles[status];
+
+	return (
+		<div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+			<div className="flex items-start justify-between gap-4">
+				<div>
+					<h3 className="font-medium text-white">Domain expiration</h3>
+
+					<p className="mt-1 text-xs text-zinc-500">RDAP expiration check</p>
+				</div>
+
+				<span
+					className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${currentStyle.badge}`}
+				>
+					<span className={`h-1.5 w-1.5 rounded-full ${currentStyle.dot}`} />
+
+					{currentStyle.label}
+				</span>
+			</div>
+
+			<div className="mt-5">
+				<p className="text-2xl font-semibold text-white">
+					{expiration.toLocaleDateString(undefined, {
+						year: 'numeric',
+						month: 'long',
+						day: 'numeric',
+					})}
+				</p>
+
+				<p className="mt-1 text-sm text-zinc-500">
+					{daysRemaining < 0
+						? `Expired ${Math.abs(daysRemaining)} days ago`
+						: daysRemaining === 0
+							? 'Expires today'
+							: `${daysRemaining} days remaining`}
+				</p>
+			</div>
+
+			{checkedAt && (
+				<p className="mt-4 text-xs text-zinc-600">
+					Last checked {new Date(checkedAt).toLocaleString()}
+				</p>
+			)}
+		</div>
+	);
+}
+
 export default function WebsiteDetails() {
 	const { id } = useParams<{ id: string }>();
 
 	const [website, setWebsite] = useState<Website | null>(null);
-
 	const [checks, setChecks] = useState<WebsiteCheck[]>([]);
-
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState('');
 
@@ -189,24 +314,23 @@ export default function WebsiteDetails() {
 
 	if (loading) {
 		return (
-			<div className="min-h-screen bg-zinc-950 px-6 py-6 text-white">
-				<div className="mx-auto max-w-6xl">
-					<p className="text-zinc-400">Loading website...</p>
-				</div>
+			<div className="min-h-screen bg-zinc-950 p-8 text-white">
+				<div className="text-zinc-400">Loading website...</div>
 			</div>
 		);
 	}
 
 	if (error || !website) {
 		return (
-			<div className="min-h-screen bg-zinc-950 px-6 py-6 text-white">
-				<div className="mx-auto max-w-6xl">
-					<Link to="/app" className="text-sm text-blue-400 hover:text-blue-300">
-						← Back to dashboard
-					</Link>
+			<div className="min-h-screen bg-zinc-950 p-8 text-white">
+				<Link
+					to="/dashboard"
+					className="text-sm text-blue-400 hover:text-blue-300"
+				>
+					← Back to dashboard
+				</Link>
 
-					<p className="mt-6 text-red-400">{error || 'Website not found.'}</p>
-				</div>
+				<p className="mt-6 text-red-400">{error || 'Website not found.'}</p>
 			</div>
 		);
 	}
@@ -233,9 +357,12 @@ export default function WebsiteDetails() {
 			: null;
 
 	return (
-		<div className="min-h-screen bg-zinc-950 text-white">
-			<div className="mx-auto max-w-6xl px-6 py-6">
-				<Link to="/app" className="text-sm text-zinc-500 hover:text-zinc-300">
+		<div className="min-h-screen bg-zinc-950 px-4 py-8 text-white sm:px-6 lg:px-8">
+			<div className="mx-auto max-w-6xl">
+				<Link
+					to="/dashboard"
+					className="text-sm text-zinc-500 hover:text-zinc-300"
+				>
 					← Back to dashboard
 				</Link>
 
@@ -252,7 +379,7 @@ export default function WebsiteDetails() {
 								}`}
 							/>
 
-							<h1 className="truncate text-3xl font-semibold text-white">
+							<h1 className="truncate text-3xl font-semibold">
 								{website.name}
 							</h1>
 						</div>
@@ -334,6 +461,49 @@ export default function WebsiteDetails() {
 				</div>
 
 				<div className="mt-6 grid gap-6 lg:grid-cols-2">
+					<DomainExpiration
+						expiresAt={website.domain_expires_at}
+						checkedAt={website.domain_checked_at}
+					/>
+
+					<div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
+						<h3 className="font-medium text-white">Monitoring information</h3>
+
+						<div className="mt-4 space-y-3 text-sm">
+							<div className="flex justify-between">
+								<span className="text-zinc-500">Status</span>
+
+								<span>{website.status ?? 'Unknown'}</span>
+							</div>
+
+							<div className="flex justify-between">
+								<span className="text-zinc-500">Monitoring</span>
+
+								<span>{website.enabled ? 'Enabled' : 'Disabled'}</span>
+							</div>
+
+							<div className="flex justify-between">
+								<span className="text-zinc-500">Check interval</span>
+
+								<span>1 minute</span>
+							</div>
+
+							<div className="flex justify-between">
+								<span className="text-zinc-500">Checks recorded</span>
+
+								<span>{checks.length}</span>
+							</div>
+
+							<div className="flex justify-between">
+								<span className="text-zinc-500">Added</span>
+
+								<span>{new Date(website.created_at).toLocaleDateString()}</span>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div className="mt-6 grid gap-6 lg:grid-cols-2">
 					<div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
 						<h3 className="font-medium text-white">Response statistics</h3>
 
@@ -383,37 +553,41 @@ export default function WebsiteDetails() {
 					</div>
 
 					<div className="rounded-xl border border-zinc-800 bg-zinc-900 p-5">
-						<h3 className="font-medium text-white">Monitoring information</h3>
+						<h3 className="font-medium text-white">Domain information</h3>
 
 						<div className="mt-4 space-y-3 text-sm">
-							<div className="flex justify-between">
-								<span className="text-zinc-500">Status</span>
+							<div className="flex justify-between gap-4">
+								<span className="text-zinc-500">Domain</span>
 
-								<span>{website.status ?? 'Unknown'}</span>
+								<span className="truncate">
+									{(() => {
+										try {
+											return new URL(website.url).hostname;
+										} catch {
+											return '—';
+										}
+									})()}
+								</span>
 							</div>
 
 							<div className="flex justify-between">
-								<span className="text-zinc-500">Monitoring</span>
+								<span className="text-zinc-500">Expiration</span>
 
-								<span>{website.enabled ? 'Enabled' : 'Disabled'}</span>
+								<span>
+									{website.domain_expires_at
+										? new Date(website.domain_expires_at).toLocaleDateString()
+										: 'Unavailable'}
+								</span>
 							</div>
 
 							<div className="flex justify-between">
-								<span className="text-zinc-500">Check interval</span>
+								<span className="text-zinc-500">Last domain check</span>
 
-								<span>1 minute</span>
-							</div>
-
-							<div className="flex justify-between">
-								<span className="text-zinc-500">Checks recorded</span>
-
-								<span>{checks.length}</span>
-							</div>
-
-							<div className="flex justify-between">
-								<span className="text-zinc-500">Added</span>
-
-								<span>{new Date(website.created_at).toLocaleDateString()}</span>
+								<span>
+									{website.domain_checked_at
+										? new Date(website.domain_checked_at).toLocaleString()
+										: 'Never'}
+								</span>
 							</div>
 						</div>
 					</div>

@@ -1,3 +1,5 @@
 name = "argus"
 compatibility_date = "2026-08-25"
-main = "src/main.ts"
+
+[assets]
+directory = "./dist"

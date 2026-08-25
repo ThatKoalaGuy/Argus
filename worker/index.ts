@@ -51,41 +51,71 @@ async function checkWebsites(env: Env) {
 
 	const websites = (await response.json()) as Website[];
 
-	const results = [];
+	const results = await Promise.all(
+		websites.map(async (website) => {
+			const result = await checkWebsite(website.url);
 
-	for (const website of websites) {
-		const result = await checkWebsite(website.url);
+			const checkedAt = new Date().toISOString();
 
-		const updateResponse = await fetch(
-			`${env.SUPABASE_URL}/rest/v1/websites?id=eq.${website.id}`,
-			{
-				method: 'PATCH',
-				headers: {
-					apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-					Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-					'Content-Type': 'application/json',
-					Prefer: 'return=minimal',
+			// Update current website status
+			const updateResponse = await fetch(
+				`${env.SUPABASE_URL}/rest/v1/websites?id=eq.${website.id}`,
+				{
+					method: 'PATCH',
+					headers: {
+						apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+						Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+						'Content-Type': 'application/json',
+						Prefer: 'return=minimal',
+					},
+					body: JSON.stringify({
+						status: result.status,
+						response_time: result.responseTime,
+						last_checked_at: checkedAt,
+					}),
 				},
-				body: JSON.stringify({
-					status: result.status,
-					response_time: result.responseTime,
-					last_checked_at: new Date().toISOString(),
-				}),
-			},
-		);
-
-		if (!updateResponse.ok) {
-			throw new Error(
-				`Failed to update ${website.name}: ${await updateResponse.text()}`,
 			);
-		}
 
-		results.push({
-			id: website.id,
-			name: website.name,
-			...result,
-		});
-	}
+			if (!updateResponse.ok) {
+				throw new Error(
+					`Failed to update ${website.name}: ${await updateResponse.text()}`,
+				);
+			}
+
+			// Save historical check
+			const historyResponse = await fetch(
+				`${env.SUPABASE_URL}/rest/v1/website_checks`,
+				{
+					method: 'POST',
+					headers: {
+						apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+						Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+						'Content-Type': 'application/json',
+						Prefer: 'return=minimal',
+					},
+					body: JSON.stringify({
+						website_id: website.id,
+						checked_at: checkedAt,
+						status: result.status,
+						response_time: result.responseTime,
+						error: result.status === 'down' ? 'Request failed' : null,
+					}),
+				},
+			);
+
+			if (!historyResponse.ok) {
+				throw new Error(
+					`Failed to save check for ${website.name}: ${await historyResponse.text()}`,
+				);
+			}
+
+			return {
+				id: website.id,
+				name: website.name,
+				...result,
+			};
+		}),
+	);
 
 	return results;
 }
@@ -124,6 +154,14 @@ export default {
 	},
 
 	async scheduled(_controller: unknown, env: Env): Promise<void> {
-		await checkWebsites(env);
+		console.log('ARGUS CRON FIRED');
+
+		try {
+			await checkWebsites(env);
+			console.log('ARGUS CRON FINISHED');
+		} catch (error) {
+			console.error('ARGUS CRON FAILED', error);
+			throw error;
+		}
 	},
 };

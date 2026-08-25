@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom';
 import Login from './pages/Login';
 import AppPage from './pages/App';
 import Dashboard from './pages/Dashboard';
+import WebsiteDetails from './pages/WebsiteDetails.tsx';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -9,6 +10,7 @@ function App() {
 		<BrowserRouter>
 			<Routes>
 				<Route path="/" element={<Navigate to="/app" replace />} />
+				<Route path="/dashboard/website/:id" element={<WebsiteDetails />} />
 
 				<Route path="/login" element={<Login />} />
 

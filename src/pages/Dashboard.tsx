@@ -1,6 +1,6 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+
 import { supabase } from '../lib/supabase';
 import AddWebsite from './AddWebsite';
 
@@ -40,12 +40,12 @@ function UptimeGraph({ checks }: { checks: WebsiteCheck[] }) {
 		);
 	}
 
-	// Group checks into 48 small segments so the graph stays compact.
 	const segmentCount = Math.min(48, sorted.length);
 	const checksPerSegment = sorted.length / segmentCount;
 
 	const segments = Array.from({ length: segmentCount }, (_, index) => {
 		const start = Math.floor(index * checksPerSegment);
+
 		const end = Math.floor((index + 1) * checksPerSegment);
 
 		const segmentChecks = sorted.slice(start, Math.max(end, start + 1));
@@ -54,9 +54,7 @@ function UptimeGraph({ checks }: { checks: WebsiteCheck[] }) {
 			(check) => check.status === 'up',
 		).length;
 
-		const uptime = upCount / segmentChecks.length;
-
-		return uptime;
+		return upCount / segmentChecks.length;
 	});
 
 	return (
@@ -95,26 +93,38 @@ export default function Dashboard() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState('');
 	const [showAddWebsite, setShowAddWebsite] = useState(false);
+	const [deleting, setDeleting] = useState<string | null>(null);
 
-	async function loadWebsites() {
-		setError('');
+	useEffect(() => {
+		let cancelled = false;
 
-		const { data: websiteData, error: websiteError } = await supabase
-			.from('websites')
-			.select('*')
-			.order('created_at', { ascending: false });
+		async function loadWebsites() {
+			const { data: websiteData, error: websiteError } = await supabase
+				.from('websites')
+				.select('*')
+				.order('created_at', {
+					ascending: false,
+				});
 
-		if (websiteError) {
-			setError(websiteError.message);
-			setLoading(false);
-			return;
-		}
+			if (cancelled) return;
 
-		const loadedWebsites = websiteData ?? [];
+			if (websiteError) {
+				setError(websiteError.message);
+				setLoading(false);
+				return;
+			}
 
-		setWebsites(loadedWebsites);
+			const loadedWebsites = websiteData ?? [];
 
-		if (loadedWebsites.length > 0) {
+			setWebsites(loadedWebsites);
+
+			if (loadedWebsites.length === 0) {
+				setChecks([]);
+				setStats({});
+				setLoading(false);
+				return;
+			}
+
 			const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
 			const { data: checkData, error: checkError } = await supabase
@@ -129,46 +139,102 @@ export default function Dashboard() {
 					ascending: true,
 				});
 
+			if (cancelled) return;
+
 			if (checkError) {
 				setError(checkError.message);
-			} else {
-				const loadedChecks = (checkData ?? []) as WebsiteCheck[];
-
-				setChecks(loadedChecks);
-
-				const newStats: Record<string, WebsiteStats> = {};
-
-				for (const website of loadedWebsites) {
-					const websiteChecks = loadedChecks.filter(
-						(check) => check.website_id === website.id,
-					);
-
-					const uptime =
-						websiteChecks.length > 0
-							? (websiteChecks.filter((check) => check.status === 'up').length /
-									websiteChecks.length) *
-								100
-							: null;
-
-					newStats[website.id] = {
-						uptime,
-						checks: websiteChecks.length,
-					};
-				}
-
-				setStats(newStats);
+				setLoading(false);
+				return;
 			}
-		} else {
-			setChecks([]);
-			setStats({});
+
+			const loadedChecks = (checkData ?? []) as WebsiteCheck[];
+
+			setChecks(loadedChecks);
+
+			const newStats: Record<string, WebsiteStats> = {};
+
+			for (const website of loadedWebsites) {
+				const websiteChecks = loadedChecks.filter(
+					(check) => check.website_id === website.id,
+				);
+
+				const uptime =
+					websiteChecks.length > 0
+						? (websiteChecks.filter((check) => check.status === 'up').length /
+								websiteChecks.length) *
+							100
+						: null;
+
+				newStats[website.id] = {
+					uptime,
+					checks: websiteChecks.length,
+				};
+			}
+
+			setStats(newStats);
+			setLoading(false);
 		}
 
-		setLoading(false);
+		loadWebsites();
+
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	async function reloadWebsites() {
+		const { data: websiteData, error: websiteError } = await supabase
+			.from('websites')
+			.select('*')
+			.order('created_at', {
+				ascending: false,
+			});
+
+		if (websiteError) {
+			setError(websiteError.message);
+			return;
+		}
+
+		setWebsites(websiteData ?? []);
 	}
 
-	useEffect(() => {
-		loadWebsites();
-	}, []);
+	async function deleteWebsite(website: Website) {
+		const confirmed = window.confirm(
+			`Delete "${website.name}"?\n\nThis will also delete its monitoring history.`,
+		);
+
+		if (!confirmed) return;
+
+		setDeleting(website.id);
+		setError('');
+
+		const { error: deleteError } = await supabase
+			.from('websites')
+			.delete()
+			.eq('id', website.id);
+
+		if (deleteError) {
+			setError(deleteError.message);
+			setDeleting(null);
+			return;
+		}
+
+		setWebsites((current) =>
+			current.filter((currentWebsite) => currentWebsite.id !== website.id),
+		);
+
+		setChecks((current) =>
+			current.filter((check) => check.website_id !== website.id),
+		);
+
+		setStats((current) => {
+			const next = { ...current };
+			delete next[website.id];
+			return next;
+		});
+
+		setDeleting(null);
+	}
 
 	if (loading) {
 		return <p className="text-zinc-400">Loading...</p>;
@@ -199,7 +265,7 @@ export default function Dashboard() {
 						onCancel={() => setShowAddWebsite(false)}
 						onAdded={() => {
 							setShowAddWebsite(false);
-							loadWebsites();
+							reloadWebsites();
 						}}
 					/>
 				</div>
@@ -218,10 +284,13 @@ export default function Dashboard() {
 					return (
 						<div
 							key={website.id}
-							className="rounded-lg border border-zinc-800 bg-zinc-900 p-4"
+							className="rounded-lg border border-zinc-800 bg-zinc-900 transition hover:border-zinc-700"
 						>
-							<div className="flex items-center justify-between gap-6">
-								<div className="min-w-0">
+							<div className="flex items-center justify-between gap-6 p-4">
+								<Link
+									to={`/dashboard/website/${website.id}`}
+									className="min-w-0 flex-1"
+								>
 									<div className="flex items-center gap-2">
 										<span
 											className={`h-2 w-2 rounded-full ${
@@ -255,12 +324,20 @@ export default function Dashboard() {
 
 										<span>{websiteStats?.checks ?? 0} checks</span>
 									</div>
-								</div>
+								</Link>
 
 								<div className="flex shrink-0 items-center gap-5">
-									<UptimeGraph checks={websiteChecks} />
+									<Link
+										to={`/dashboard/website/${website.id}`}
+										className="hidden sm:block"
+									>
+										<UptimeGraph checks={websiteChecks} />
+									</Link>
 
-									<div className="w-20 text-right">
+									<Link
+										to={`/dashboard/website/${website.id}`}
+										className="w-20 text-right"
+									>
 										<p className="text-[11px] text-zinc-500">24h uptime</p>
 
 										<p className="mt-1 text-lg font-semibold">
@@ -269,7 +346,15 @@ export default function Dashboard() {
 												? `${websiteStats.uptime.toFixed(2)}%`
 												: '—'}
 										</p>
-									</div>
+									</Link>
+
+									<button
+										onClick={() => deleteWebsite(website)}
+										disabled={deleting === website.id}
+										className="rounded-md px-2 py-1 text-xs text-zinc-500 transition hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+									>
+										{deleting === website.id ? 'Deleting...' : 'Delete'}
+									</button>
 								</div>
 							</div>
 						</div>
